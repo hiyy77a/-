@@ -114,6 +114,17 @@
   .skill i { font-style:normal; color:#7a7362; margin-left:5px; font-size:12px; }
   .skill.off { opacity:.35; }
   .skill.on  { box-shadow:0 0 8px rgba(176,58,42,.6); }
+  #bufftag {
+    margin-top:12px; display:inline-block;
+    border:2px solid #b03a2a; color:#b03a2a;
+    background:rgba(244,238,222,.92); padding:3px 12px;
+    border-radius:4px; font-size:15px; letter-spacing:1px;
+    animation:buffpulse .8s ease-in-out infinite;
+  }
+  @keyframes buffpulse {
+    0%,100% { box-shadow:0 0 4px rgba(176,58,42,.35); transform:scale(1); }
+    50%     { box-shadow:0 0 16px rgba(176,58,42,.9); transform:scale(1.04); }
+  }
 
   /* ---------- 素材按钮 / 面板 ---------- */
   #assetBtn {
@@ -204,6 +215,7 @@
     <div class="skill" id="sk2"><b>2</b>墨雨<i>50</i></div>
     <div class="skill" id="sk3"><b>3</b>凝神<i>40</i></div>
   </div>
+  <div id="bufftag" class="hidden"></div>
 </div>
 
 <button id="assetBtn" class="hidden">素材 (F2)</button>
@@ -267,7 +279,7 @@ const overlay = $("overlay"), textwrap = $("textwrap"), textbar = $("textbar"),
       vitalsEl = $("vitals"), hpbarEl = $("hpbar"), inkbarEl = $("inkbar"),
       sk1El = $("sk1"), sk2El = $("sk2"), sk3El = $("sk3"),
       assetBtnEl = $("assetBtn"), assetPanelEl = $("assetPanel"),
-      slotListEl = $("slotList"), goEl = $("gameover");
+      slotListEl = $("slotList"), goEl = $("gameover"), bufftagEl = $("bufftag");
 
 let W = 0, H = 0, groundY = 0;
 
@@ -527,7 +539,8 @@ let score = 0, wave = 1, sceneIdx = 0;
 const player = {
   baseX:0, x:0,
   forward:0, lastAtk:-9, slashT:9, runC:0,
-  hp:100, maxHp:100, ink:0, shield:0, hurtT:0
+  hp:100, maxHp:100, ink:0, shield:0, hurtT:0,
+  buffT:0, buffBurstT:9
 };
 
 const enemy = {
@@ -1222,6 +1235,15 @@ function drawPlayer(){
   ctx.beginPath(); ctx.moveTo(hh[0],hh[1]); ctx.lineTo(tip[0],tip[1]); ctx.stroke();
   ctx.strokeStyle = "rgba(244,240,228,0.95)"; ctx.lineWidth = 2.2;
   ctx.beginPath(); ctx.moveTo(hh[0],hh[1]); ctx.lineTo(tip[0],tip[1]); ctx.stroke();
+  if(player.buffT > 0){
+    ctx.save();
+    ctx.shadowColor = "rgba(220,70,40,0.9)";
+    ctx.shadowBlur = 10;
+    ctx.strokeStyle = `rgba(200,60,36,${0.5+0.2*Math.sin(now*10)})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(hh[0],hh[1]); ctx.lineTo(tip[0],tip[1]); ctx.stroke();
+    ctx.restore();
+  }
   ctx.strokeStyle = RED; ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(hh[0], hh[1]);
@@ -2110,6 +2132,18 @@ function killEnemy(){
   score += boss ? 150 + wave*10 : 30 + wave*5;
   sfx("gong");
   stamps.push({ text:"破", x:enemy.x, y:groundY-150, t:0 });
+  // 破阵奖励：回复 50% 气血 + 剑势昂扬（攻击 +50%，8 秒）
+  const healed = Math.min(player.maxHp, player.hp + player.maxHp*0.5) - player.hp;
+  player.hp += healed;
+  if(healed > 0) dmgs.push({ x:player.x+10, y:groundY-140, v:Math.round(healed), t:0, heal:true });
+  player.buffT = 8;
+  player.buffBurstT = 0;
+  stamps.push({ text:"剑势昂扬", x:player.x+70, y:groundY-230, t:0 });
+  for(let i=0;i<14;i++){
+    const a = rand(-2.8,-0.3);
+    sparks.push({ x:player.x+6, y:groundY-56, vx:Math.cos(a)*rand(120,380), vy:Math.sin(a)*rand(120,380),
+                  life:rand(.25,.5), t:0, w:rand(1.2,2.4), col:"200,64,38" });
+  }
   shake = Math.min(shake+(boss?14:6), 20);
   const n = boss ? 60 : 34;
   for(let i=0;i<n;i++){
@@ -2180,7 +2214,8 @@ function updateUlt(dt){
     sfx("slash"); sfx("gong");
     shake = Math.min(shake+16, 26);
     if(!enemy.dead){
-      const dmg = Math.max(150, Math.round(enemy.maxHp*0.45));
+      let dmg = Math.max(150, Math.round(enemy.maxHp*0.45));
+      if(player.buffT > 0) dmg = Math.round(dmg*1.5);
       applyDamage(dmg, enemy.x-30, groundY-108, true);
     }
   }
@@ -2345,6 +2380,7 @@ function startGame(){
   typing.startAt = now;
   player.forward = 0; player.slashT = 9;
   player.hp = player.maxHp = 100; player.ink = 0; player.shield = 0; player.hurtT = 0;
+  player.buffT = 0; player.buffBurstT = 9;
   qis = []; parts = []; sparks = []; rings = []; slashes = []; dmgs = []; stamps = []; wisps = [];
   foes = []; drops = []; rain.n = 0;
   goEl.classList.add("hidden");
@@ -2410,12 +2446,14 @@ function update(dt){
     d.t += dt;
     if(d.t >= 0.18 && !d.hit){
       d.hit = true;
-      if(!enemy.dead) applyDamage(5, d.x, groundY-100, false);
+      if(!enemy.dead) applyDamage(player.buffT>0 ? 8 : 5, d.x, groundY-100, false);
     }
     if(d.t > 0.45) drops.splice(i,1);
   }
 
   player.hurtT = Math.max(0, player.hurtT - dt*2);
+  player.buffT = Math.max(0, player.buffT - dt);
+  player.buffBurstT += dt;
 
   // Boss 招式节拍（与绘制端相位同步的周期动作）
   if(enemy.bossIdx >= 0 && !enemy.dead){
@@ -2479,7 +2517,8 @@ function update(dt){
       t:0, life:rand(.3,.6), col:"48,50,62", curl:rand(0.7,1.3) });
     const reach = enemy.x - (enemy.bossIdx>=0 ? 58 : 42);
     if(!enemy.dead && q.x >= reach){
-      const dmg = 1 + Math.min(3, Math.floor(typing.combo/15));
+      let dmg = 1 + Math.min(3, Math.floor(typing.combo/15));
+      if(player.buffT > 0) dmg = Math.round(dmg*1.5);
       applyDamage(dmg, reach+8, groundY-100, dmg>=3);
       qis.splice(i,1);
     }else if(q.x > W+60){
@@ -2547,6 +2586,12 @@ function update(dt){
   sk2El.classList.toggle("off", player.ink < 50 || rain.n > 0);
   sk3El.classList.toggle("off", player.ink < 40 || player.hp >= player.maxHp);
   sk1El.classList.toggle("on", player.shield > 0);
+  if(player.buffT > 0){
+    bufftagEl.classList.remove("hidden");
+    bufftagEl.textContent = "剑势昂扬 · 攻击 +50% · " + Math.ceil(player.buffT) + "s";
+  }else{
+    bufftagEl.classList.add("hidden");
+  }
   if(typing.combo >= 5){
     comboEl.classList.remove("hidden");
     const toUlt = 100 - (typing.combo % 100);
@@ -2570,9 +2615,15 @@ function drawQi(x, y, alpha){
   ctx.translate(x, y);
   // 朱砂气旋（追着剑气旋转的红涡）
   const t = now*10;
-  ctx.strokeStyle = `rgba(176,58,42,${alpha*0.5})`;
-  ctx.lineWidth = 2; ctx.lineCap = "round";
+  const buffed = player.buffT > 0;
+  ctx.strokeStyle = `rgba(176,58,42,${alpha*(buffed?0.85:0.5)})`;
+  ctx.lineWidth = buffed ? 3 : 2; ctx.lineCap = "round";
   ctx.beginPath(); ctx.arc(-20, 0, 14, t%TAU, t%TAU+4.2); ctx.stroke();
+  if(buffed){
+    ctx.strokeStyle = `rgba(220,80,40,${alpha*0.6})`;
+    ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.arc(-14, 0, 26, -1.05, 1.05); ctx.stroke();
+  }
   // 墨月牙（浓墨主笔 + 淡墨晕笔）
   ctx.strokeStyle = `rgba(28,30,40,${alpha*0.35})`;
   ctx.lineWidth = 11;
@@ -2665,6 +2716,48 @@ function drawEffects(){
     ctx.lineWidth = 1.6;
     ctx.beginPath(); ctx.moveTo(d.x, yTip-70); ctx.lineTo(d.x, yTip-4); ctx.stroke();
   }
+  // 剑势昂扬：破阵强化动画
+  if(player.buffT > 0){
+    const fade = Math.min(1, player.buffT/1.2);
+    const px2 = player.x+6, base = groundY;
+    // 持续：环绕脚下的朱砂旋焰
+    for(let i=0;i<3;i++){
+      const a = now*4 + i*TAU/3;
+      ctx.strokeStyle = `rgba(196,60,36,${(0.4+0.15*Math.sin(now*8+i))*fade})`;
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.ellipse(px2, base-6, 46, 12, 0, a, a+1.9);
+      ctx.stroke();
+    }
+    // 升腾的朱砂墨焰
+    if(Math.random() < 0.5) parts.push({
+      x:px2+rand(-30,30), y:base-rand(0,90), vx:rand(-12,12), vy:rand(-90,-40),
+      r:rand(1.5,3.5), life:rand(.3,.6), t:0, col:"rgba(196,60,36," });
+    if(Math.random() < 0.25) wisps.push({
+      x:px2+rand(-26,26), y:base-rand(10,70), drift:rand(16,30), len:rand(12,22),
+      t:0, life:rand(.4,.7), col:"196,60,36", curl:rand(.7,1.4) });
+    // 爆发：破阵瞬间的升腾光柱与扩散环
+    const bt2 = player.buffBurstT;
+    if(bt2 < 0.9){
+      const p = bt2/0.9, ba = 1-p;
+      const grd = ctx.createLinearGradient(0, base, 0, base-270);
+      grd.addColorStop(0, `rgba(220,80,40,${0.42*ba})`);
+      grd.addColorStop(1, "rgba(220,80,40,0)");
+      ctx.fillStyle = grd;
+      const bw3 = 66*(1-p*0.4);
+      ctx.fillRect(px2-bw3/2, base-270, bw3, 270);
+      ctx.strokeStyle = `rgba(196,60,36,${0.7*ba})`;
+      ctx.lineWidth = 4*ba+1;
+      ctx.beginPath();
+      ctx.ellipse(px2, base-4, 20+easeOut(p)*95, (20+easeOut(p)*95)*0.3, 0, 0, TAU);
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(244,240,228,${0.6*ba})`;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.ellipse(px2, base-4, 14+easeOut(p)*80, (14+easeOut(p)*80)*0.3, 0, 0, TAU);
+      ctx.stroke();
+    }
+  }
   // 护体墨盾
   if(player.shield > 0){
     const a0 = now*2;
@@ -2712,8 +2805,9 @@ function drawEffects(){
   for(const d of dmgs){
     const a = 1 - d.t/0.8;
     ctx.font = (d.crit ? "bold 32px" : "24px") + " Georgia, serif";
-    ctx.fillStyle = d.crit ? `rgba(176,58,42,${a})` : `rgba(35,38,45,${a})`;
-    ctx.fillText("-"+d.v, d.x, d.y - d.t*55);
+    ctx.fillStyle = d.heal ? `rgba(96,130,70,${a})`
+                  : d.crit ? `rgba(176,58,42,${a})` : `rgba(35,38,45,${a})`;
+    ctx.fillText((d.heal ? "+" : "-") + d.v, d.x, d.y - d.t*55);
   }
   // 印章特效
   for(const s of stamps){
@@ -2808,6 +2902,7 @@ window.__dbg = {
   },
   ult(){ startUlt(); },
   ink(){ player.ink = 100; },
+  kill(){ if(!enemy.dead) killEnemy(); },
   hurt(n){ hurtPlayer(n||20); },
   state(){ return { wave, sceneIdx, boss:enemy.bossIdx, hp:enemy.hp,
                     php:player.hp, ink:player.ink, shield:player.shield }; }
