@@ -272,7 +272,7 @@
  * ========================================================= */
 
 const cvs = document.getElementById("game");
-const ctx = cvs.getContext("2d");
+let ctx = cvs.getContext("2d");
 
 const $ = id => document.getElementById(id);
 const overlay = $("overlay"), textwrap = $("textwrap"), textbar = $("textbar"),
@@ -605,19 +605,19 @@ const ult = { active:false, t:0, hitDone:false, streaks:[], splat:[] };
 const SCENES = [
   { name:"竹林", sky:["#efe8d4","#e9e2cf","#ded5bd"],
     sun:{x:0.78,y:0.16,r:46,col:"rgba(176,58,42,0.18)"},
-    ground:"rgba(52,54,62,0.16)", line:"rgba(40,42,50,0.6)", detail:"rgba(45,48,56,0.4)" },
+    ground:"rgba(52,54,62,0.16)", g2:["rgba(52,54,62,0.32)","rgba(52,54,62,0.08)"], line:"rgba(40,42,50,0.6)", detail:"rgba(45,48,56,0.4)" },
   { name:"大漠", sky:["#f4e2bd","#eed7ac","#e2c592"],
     sun:{x:0.7,y:0.18,r:66,col:"rgba(190,72,40,0.32)"},
-    ground:"rgba(150,112,64,0.22)", line:"rgba(110,80,45,0.55)", detail:"rgba(120,88,50,0.4)" },
+    ground:"rgba(150,112,64,0.22)", g2:["rgba(150,112,64,0.36)","rgba(150,112,64,0.1)"], line:"rgba(110,80,45,0.55)", detail:"rgba(120,88,50,0.4)" },
   { name:"沧海", sky:["#e9eeec","#dfe7e4","#cdd9d5"],
     sun:{x:0.8,y:0.13,r:40,col:"rgba(200,120,90,0.16)"},
-    ground:"rgba(70,96,102,0.28)", line:"rgba(50,70,76,0.55)", detail:"rgba(60,86,92,0.5)" },
+    ground:"rgba(70,96,102,0.28)", g2:["rgba(70,96,102,0.42)","rgba(70,96,102,0.14)"], line:"rgba(50,70,76,0.55)", detail:"rgba(60,86,92,0.5)" },
   { name:"古镇", sky:["#eee0c4","#e6d5b6","#d6c29e"],
     sun:{x:0.24,y:0.13,r:42,col:"rgba(200,110,60,0.22)"},
-    ground:"rgba(80,74,66,0.22)", line:"rgba(55,50,45,0.6)", detail:"rgba(70,64,56,0.45)" },
+    ground:"rgba(80,74,66,0.22)", g2:["rgba(80,74,66,0.36)","rgba(80,74,66,0.1)"], line:"rgba(55,50,45,0.6)", detail:"rgba(70,64,56,0.45)" },
   { name:"云海", sky:["#edebdf","#e7e5d7","#dbd9c9"],
     sun:{x:0.76,y:0.13,r:54,col:"rgba(235,231,214,0.7)"},
-    ground:"rgba(196,194,182,0.4)", line:"rgba(120,118,108,0.45)", detail:"rgba(150,148,138,0.5)" }
+    ground:"rgba(196,194,182,0.4)", g2:["rgba(196,194,182,0.55)","rgba(196,194,182,0.2)"], line:"rgba(120,118,108,0.45)", detail:"rgba(150,148,138,0.5)" }
 ];
 function sceneOf(w){ return Math.floor((w-1)/5) % SCENES.length; }
 
@@ -686,6 +686,15 @@ function buildScene(i){
     });
     elems.peaks = [{x:W*0.35,w:180,h:H*0.3},{x:W*1.3,w:230,h:H*0.36}];
   }
+  elems.groundTex = mkCanvas(8, H-groundY);
+  {
+    const gg = elems.groundTex.getContext("2d");
+    const gr2 = gg.createLinearGradient(0, 0, 0, H-groundY);
+    gr2.addColorStop(0, SCENES[i].g2[0]);
+    gr2.addColorStop(1, SCENES[i].g2[1]);
+    gg.fillStyle = gr2;
+    gg.fillRect(0, 0, 8, H-groundY);
+  }
   if(i === 2){
     elems.seaGrad = ctx.createLinearGradient(0, H*0.48, 0, groundY);
     elems.seaGrad.addColorStop(0, "rgba(120,148,144,0.30)");
@@ -706,22 +715,73 @@ function buildBgCache(i){
   skyGrad.addColorStop(1, S.sky[2]);
   sg.fillStyle = skyGrad;
   sg.fillRect(0,0,W,H);
+  // 日晕（三层柔光）
+  const sgl = sg.createRadialGradient(W*S.sun.x, H*S.sun.y, S.sun.r*0.4, W*S.sun.x, H*S.sun.y, S.sun.r*3);
+  sgl.addColorStop(0, S.sun.col.replace(/[\d.]+\)$/, "0.30)"));
+  sgl.addColorStop(0.5, S.sun.col.replace(/[\d.]+\)$/, "0.10)"));
+  sgl.addColorStop(1, S.sun.col.replace(/[\d.]+\)$/, "0)"));
+  sg.fillStyle = sgl;
+  sg.fillRect(W*S.sun.x - S.sun.r*3, H*S.sun.y - S.sun.r*3, S.sun.r*6, S.sun.r*6);
   sg.beginPath();
   sg.arc(W*S.sun.x, H*S.sun.y, S.sun.r, 0, TAU);
   sg.fillStyle = S.sun.col;
   sg.fill();
+  // 日边浮云（横抹淡笔）
+  sg.strokeStyle = "rgba(244,240,228,0.4)";
+  sg.lineCap = "round";
+  for(let k=0;k<3;k++){
+    sg.lineWidth = 5-k;
+    sg.beginPath();
+    sg.moveTo(W*S.sun.x - S.sun.r*(1.6+k*0.7), H*S.sun.y + S.sun.r*(0.2+k*0.34));
+    sg.lineTo(W*S.sun.x + S.sun.r*(1.2+k*0.9), H*S.sun.y + S.sun.r*(0.2+k*0.34));
+    sg.stroke();
+  }
   if(i === 4){
     sg.strokeStyle = "rgba(210,206,190,0.5)";
     sg.lineWidth = 2;
     sg.beginPath(); sg.arc(W*S.sun.x, H*S.sun.y, S.sun.r+14, 0, TAU); sg.stroke();
   }
   const layers = ridges.map(r => {
-    const p = new Path2D();
-    p.moveTo(0, H);
-    for(const [x,y] of r.pts) p.lineTo(x, y);
-    p.lineTo(W*2, H);
-    p.closePath();
-    return { p, col:r.col, speed:r.speed };
+    let minY = H, sumY = 0;
+    for(const pt of r.pts){ if(pt[1] < minY) minY = pt[1]; sumY += pt[1]; }
+    minY = Math.max(0, minY - 8);
+    const avgY = sumY / r.pts.length;
+    const texH = H - minY;
+    const m = r.col.match(/rgba\((\d+),(\d+),(\d+),([\d.]+)\)/);
+    const [cr,cg,cb,ca] = [m[1],m[2],m[3],+m[4]];
+    // 整层水墨山峦烘焙：晕染渐变 + 水痕淡笔 + 山脊浓笔
+    const tex = mkCanvas(W*2, texH);
+    const tg = tex.getContext("2d");
+    tg.translate(0, -minY);
+    tg.beginPath();
+    tg.moveTo(0, H);
+    for(const [x,y] of r.pts) tg.lineTo(x, y);
+    tg.lineTo(W*2, H);
+    tg.closePath();
+    const grad = tg.createLinearGradient(0, minY, 0, H);
+    grad.addColorStop(0, `rgba(${cr},${cg},${cb},${Math.min(1,ca*1.45)})`);
+    grad.addColorStop(0.42, r.col);
+    grad.addColorStop(1, `rgba(${cr},${cg},${cb},${ca*0.35})`);
+    tg.fillStyle = grad;
+    tg.fill();
+    tg.lineCap = "round"; tg.lineJoin = "round";
+    tg.beginPath();
+    tg.moveTo(r.pts[0][0], r.pts[0][1]);
+    for(let k=1;k<r.pts.length;k++) tg.lineTo(r.pts[k][0], r.pts[k][1]);
+    tg.strokeStyle = "rgba(244,240,226,0.3)";
+    tg.lineWidth = 6;
+    tg.stroke();
+    tg.strokeStyle = `rgba(${cr},${cg},${cb},${Math.min(1,ca*2)})`;
+    tg.lineWidth = 2;
+    tg.stroke();
+    // 山脚雾带（直接烘进纹理，随山体滚动）
+    const band = tg.createLinearGradient(0, avgY-20, 0, avgY+130);
+    band.addColorStop(0, "rgba(244,240,226,0)");
+    band.addColorStop(0.55, "rgba(244,240,226,0.34)");
+    band.addColorStop(1, "rgba(244,240,226,0)");
+    tg.fillStyle = band;
+    tg.fillRect(0, avgY-20, W*2, 150);
+    return { tex, minY, texH, speed:r.speed };
   });
   bgCache = { skyTex, layers };
 }
@@ -853,11 +913,8 @@ function drawBackground(){
   ctx.drawImage(bgCache.skyTex, 0, 0, W, H);
   for(const L of bgCache.layers){
     const off = (scroll * L.speed / 46) % W;
-    ctx.save();
-    ctx.translate(-off, 0);
-    ctx.fillStyle = L.col;
-    ctx.fill(L.p);
-    ctx.restore();
+    // 只拷贝可视窗口（源坐标为设备像素）
+    ctx.drawImage(L.tex, off*DPR, 0, W*DPR, L.texH*DPR, 0, L.minY, W, L.texH);
   }
 
   // 场景专属元素
@@ -919,9 +976,9 @@ function drawBackground(){
     ctx.stroke();
   }
 
-  // 地面
-  ctx.fillStyle = S.ground;
-  ctx.fillRect(0, groundY, W, H-groundY);
+  // 地面（纵深渐变，烘焙贴图横向拉伸）
+  if(elems.groundTex) ctx.drawImage(elems.groundTex, 0, groundY, W, H-groundY);
+  else { ctx.fillStyle = S.ground; ctx.fillRect(0, groundY, W, H-groundY); }
   ctx.strokeStyle = S.line;
   ctx.lineWidth = 3; ctx.lineCap = "round";
   ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(W, groundY); ctx.stroke();
@@ -1211,6 +1268,31 @@ function drawVortex(cx, cy, R, core, arm){
   }
 }
 
+/* ---- 角色离屏缓冲：矢量绘制后在剪影内叠加光照，获得手绘体积感 ---- */
+const charBufs = {};
+function getBuf(key, w, h){
+  let b = charBufs[key];
+  if(!b || b.dpr !== DPR){
+    const c = mkCanvas(w, h);
+    const g = c.getContext("2d");
+    // 光照层烘焙：顶部暖光 + 底部冷影 + 右侧轮辉，一张贴图一次合成
+    const light = mkCanvas(w, h);
+    const lg = light.getContext("2d");
+    const lit = lg.createLinearGradient(0, 0, 0, h);
+    lit.addColorStop(0, "rgba(255,244,214,0.20)");
+    lit.addColorStop(0.5, "rgba(255,255,255,0)");
+    lit.addColorStop(1, "rgba(30,34,60,0.24)");
+    lg.fillStyle = lit; lg.fillRect(0,0,w,h);
+    const rim = lg.createLinearGradient(w, 0, w*0.45, 0);
+    rim.addColorStop(0, "rgba(255,238,196,0.18)");
+    rim.addColorStop(1, "rgba(255,238,196,0)");
+    lg.fillStyle = rim; lg.fillRect(0,0,w,h);
+    b = { c, g, w, h, light, dpr:DPR };
+    charBufs[key] = b;
+  }
+  return b;
+}
+
 function drawBoot(f, col){
   ctx.fillStyle = col;
   ctx.beginPath();
@@ -1251,6 +1333,30 @@ function drawPlayer(){
     }
     return;
   }
+  // 矢量角色 → 离屏缓冲 + 剪影光照
+  const b = getBuf("player", 320, 240);
+  const g = b.g;
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  g.clearRect(0, 0, b.w, b.h);
+  g.translate(b.w/2 - px, (b.h-14) - gy);
+  const saved = ctx; ctx = g;
+  drawPlayerVec();
+  ctx = saved;
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  g.globalCompositeOperation = "source-atop";
+  g.drawImage(b.light, 0, 0, b.w, b.h);
+  if(player.buffT > 0){
+    g.fillStyle = `rgba(220,90,40,${0.10+0.06*Math.sin(now*9)})`;
+    g.fillRect(0, 0, b.w, b.h);
+  }
+  g.globalCompositeOperation = "source-over";
+  ctx.drawImage(b.c, px - b.w/2, gy - (b.h-14), b.w, b.h);
+}
+
+function drawPlayerVec(){
+  const px = player.x, gy = groundY;
+  const fw = player.forward, runc = player.runC, slash = player.slashT;
+  const slashing = slash < 0.3;
   const bob = Math.sin(runc*2)*2.2*(1-fw);
   const lean = 0.08 + fw*0.3;
 
@@ -2826,6 +2932,7 @@ function drawQi(x, y, alpha){
   }
   ctx.save();
   ctx.translate(x, y);
+  if(alpha > 0.6) ctx.drawImage(glowFor("120,140,175"), -40, -26, 52, 52);
   // 朱砂气旋（追着剑气旋转的红涡）
   const t = now*10;
   const buffed = player.buffT > 0;
@@ -3078,13 +3185,12 @@ function frame(ts){
 
   drawBackground();
   if(state !== ST.TITLE) drawEnemy();
+  const pb = charBufs.player;
   for(const g2 of ghosts){
     ctx.save();
     ctx.globalAlpha = 0.22*(1 - g2.t/0.22);
-    const rx = player.x;
-    player.x = g2.x;
-    drawPlayer();
-    player.x = rx;
+    if(sprites.player) drawSprite("player", g2.x, groundY, 178, {});
+    else if(pb) ctx.drawImage(pb.c, g2.x - pb.w/2, groundY - (pb.h-14), pb.w, pb.h);
     ctx.restore();
   }
   drawPlayer();
