@@ -10,6 +10,7 @@
   html,body { width:100%; height:100%; overflow:hidden; background:#e9e2cf; }
   body { font-family:"STKaiti","KaiTi","Noto Serif SC",Georgia,serif; }
   #game { position:absolute; inset:0; display:block; }
+  #glfx { position:absolute; inset:0; display:none; pointer-events:none; }
 
   /* ---------- 底部长文本条 ---------- */
   #textwrap {
@@ -197,6 +198,7 @@
 </head>
 <body>
 <canvas id="game"></canvas>
+<canvas id="glfx"></canvas>
 
 <div id="hudL" class="hud hidden">
   <div><span class="seal">分</span><span id="score">0</span></div>
@@ -244,7 +246,7 @@
 <div id="textwrap" class="hidden">
   <div id="textbar">
     <div id="passage"></div>
-    <div id="hint">依次键入上方文字 · 百连发动「斩」 · 1/2/3 技能 · F2 素材 · Esc 暂停 · M 静音</div>
+    <div id="hint">依次键入上方文字 · 百连发动「斩」 · 1/2/3 技能 · F2 素材 · F4 水墨滤镜 · Esc 暂停 · M 静音</div>
   </div>
 </div>
 
@@ -526,6 +528,165 @@ function buildAssetPanel(){
     });
     slotListEl.appendChild(row);
   }
+}
+
+/* =========================================================
+ * WebGL 水墨后处理：湿墨扩散 / 纸纤维颗粒 / 命中涟漪 / 色彩分级
+ * 2D 画面 → 纹理 → 片元着色器；不可用或低帧自动回退纯 2D
+ * ========================================================= */
+let gl = null, glOn = false, glProg = null, glTex = null, glCvs = null;
+let glRips = [], glU = {}, glAuto = true, glStartT = 0, glFrameAvg = 20;
+
+const GL_VS = "attribute vec2 a_p; varying vec2 v_uv;" +
+  "void main(){ v_uv = a_p*0.5+0.5; gl_Position = vec4(a_p,0.,1.); }";
+
+const GL_FS = `
+precision mediump float;
+varying vec2 v_uv;
+uniform sampler2D u_tex;
+uniform vec2 u_res;
+uniform float u_time;
+uniform float u_ult;
+uniform vec3 u_rip[4];
+
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  f = f*f*(3.-2.*f);
+  return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),
+             mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),f.x), f.y);
+}
+
+void main(){
+  vec2 uv = v_uv;
+  vec2 px = 1.0/u_res;
+
+  // 命中涟漪：径向水波扭曲
+  vec2 disp = vec2(0.0);
+  for(int i=0;i<4;i++){
+    vec3 r = u_rip[i];
+    if(r.z >= 0.0 && r.z < 1.2){
+      vec2 c = r.xy/u_res;
+      vec2 d = uv - c;
+      d.x *= u_res.x/u_res.y;
+      float dist = length(d);
+      float w = sin(dist*64.0 - r.z*11.0) * exp(-dist*8.0) * exp(-r.z*3.2) * 0.0045;
+      disp += normalize(d + 1e-5) * w;
+    }
+  }
+  uv += disp;
+
+  vec4 col = texture2D(u_tex, uv);
+
+  // 湿墨扩散：邻域含墨量越高，向本像素渗透越多（奥义时加剧）
+  float rad = 1.2 + u_ult*2.4;
+  vec3 nb = texture2D(u_tex, uv + vec2(px.x,0.)*rad).rgb
+          + texture2D(u_tex, uv - vec2(px.x,0.)*rad).rgb
+          + texture2D(u_tex, uv + vec2(0.,px.y)*rad).rgb
+          + texture2D(u_tex, uv - vec2(0.,px.y)*rad).rgb;
+  nb *= 0.25;
+  float dark = 1.0 - dot(nb, vec3(0.333));
+  float n = noise(uv*u_res*0.55);
+  float bleed = dark*dark * (0.16 + u_ult*0.28) * (0.55 + 0.45*n);
+  col.rgb = mix(col.rgb, min(col.rgb, nb), bleed);
+
+  // 边缘颗粒：墨在纸纤维处沉积（浓淡交界颗粒化）
+  float lum  = dot(col.rgb, vec3(0.333));
+  float lumN = dot(nb, vec3(0.333));
+  float edge = abs(lum - lumN);
+  col.rgb -= edge * n * 0.22;
+
+  // 纸张纤维（横向长纤维 + 细密颗粒）
+  float fiber = noise(uv*u_res*vec2(0.9,0.22))*0.5 + noise(uv*u_res*2.3)*0.5;
+  col.rgb *= 0.965 + fiber*0.065;
+
+  // 色彩分级：轻 S 曲线 + 暖调
+  col.rgb = mix(col.rgb, col.rgb*col.rgb*(3.0-2.0*col.rgb), 0.18);
+  col.rgb *= vec3(1.015, 1.0, 0.972);
+
+  gl_FragColor = vec4(col.rgb, 1.0);
+}`;
+
+function initGL(){
+  glCvs = document.getElementById("glfx");
+  try{ gl = glCvs.getContext("webgl", { preserveDrawingBuffer:true, alpha:false }); }
+  catch(e){ gl = null; }
+  if(!gl) return false;
+  const mk = (type, src) => {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if(!gl.getShaderParameter(sh, gl.COMPILE_STATUS)){
+      console.warn("shader:", gl.getShaderInfoLog(sh));
+      return null;
+    }
+    return sh;
+  };
+  const vs = mk(gl.VERTEX_SHADER, GL_VS), fs = mk(gl.FRAGMENT_SHADER, GL_FS);
+  if(!vs || !fs) return false;
+  glProg = gl.createProgram();
+  gl.attachShader(glProg, vs);
+  gl.attachShader(glProg, fs);
+  gl.linkProgram(glProg);
+  if(!gl.getProgramParameter(glProg, gl.LINK_STATUS)) return false;
+  gl.useProgram(glProg);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(glProg, "a_p");
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  glTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, glTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  for(const nm of ["u_tex","u_res","u_time","u_ult","u_rip"])
+    glU[nm] = gl.getUniformLocation(glProg, nm);
+  return true;
+}
+function setGL(on){
+  glOn = on && !!gl;
+  glCvs.style.display = glOn ? "block" : "none";
+  cvs.style.visibility = glOn ? "hidden" : "visible";
+  if(glOn) glStartT = now;
+}
+function glResize(){
+  if(!gl) return;
+  glCvs.width = cvs.width;
+  glCvs.height = cvs.height;
+  glCvs.style.width = W + "px";
+  glCvs.style.height = H + "px";
+  gl.viewport(0, 0, glCvs.width, glCvs.height);
+}
+function glRipple(x, y){
+  glRips.push({ x, y, t0: now });
+  if(glRips.length > 4) glRips.shift();
+}
+const glRipArr = new Float32Array(12);
+function glDraw(){
+  gl.bindTexture(gl.TEXTURE_2D, glTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cvs);
+  gl.uniform1i(glU.u_tex, 0);
+  gl.uniform2f(glU.u_res, glCvs.width, glCvs.height);
+  gl.uniform1f(glU.u_time, now);
+  let ua = 0;
+  if(ult.active) ua = clamp(Math.min(ult.t/0.18, (2.2-ult.t)/0.5), 0, 1)*0.85;
+  gl.uniform1f(glU.u_ult, ua);
+  for(let i=0;i<4;i++){
+    const r = glRips[i];
+    if(r){
+      glRipArr[i*3]   = r.x*DPR;
+      glRipArr[i*3+1] = (H - r.y)*DPR;
+      glRipArr[i*3+2] = now - r.t0;
+    }else{
+      glRipArr[i*3+2] = -1;
+    }
+  }
+  gl.uniform3fv(glU.u_rip, glRipArr);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
 /* ---- 生成式古琴背景音（五声音阶随机拨弦） ---- */
@@ -869,6 +1030,7 @@ function resize(){
   paperPat = ctx.createPattern(paperTex, "repeat");
   buildStaticTex();
   buildScene(sceneIdx);
+  glResize();
 }
 window.addEventListener("resize", resize);
 
@@ -2342,6 +2504,7 @@ function hurtPlayer(dmg){
   }
   player.hp -= dmg;
   player.hurtT = 1;
+  if(glOn) glRipple(player.x, groundY-60);
   shake = Math.min(shake+6, 14);
   sfx("err");
   for(let i=0;i<8;i++) parts.push({
@@ -2426,6 +2589,7 @@ function killEnemy(){
                   col: Math.random()<0.4 ? "190,60,40" : "236,230,216" });
   }
   rings.push({ x:enemy.x, y:groundY-95, r:12, t:0, life:0.5, w:5 });
+  if(glOn) glRipple(enemy.x, groundY-95);
 }
 
 function applyDamage(dmg, qx, qy, crit){
@@ -2448,6 +2612,7 @@ function applyDamage(dmg, qx, qy, crit){
                   col: Math.random()<0.4 ? "190,60,40" : "58,60,72" });
   }
   rings.push({ x:qx, y:qy, r:6, t:0, life:0.32, w:3 });
+  if(glOn) glRipple(qx, qy);
   for(let i=0;i<2;i++) wisps.push({
     x:qx+rand(-10,10), y:qy+rand(-8,8), drift:rand(14,26), len:rand(14,26),
     t:0, life:rand(.45,.85), col: i? "150,40,32" : "48,50,62", curl:rand(0.7,1.5)
@@ -2482,6 +2647,7 @@ function updateUlt(dt){
     sfx("slash"); sfx("gong");
     shake = Math.min(shake+16, 26);
     freeze = Math.max(freeze, 0.1);
+    if(glOn) glRipple(W/2, H*0.45);
     if(!enemy.dead){
       let dmg = Math.max(150, Math.round(enemy.maxHp*0.45));
       if(player.buffT > 0) dmg = Math.round(dmg*1.5);
@@ -2580,6 +2746,11 @@ function onKey(e){
     }
   }
   if(e.key === "F2"){ e.preventDefault(); toggleAssetPanel(); return; }
+  if(e.key === "F4"){
+    e.preventDefault();
+    if(gl){ glAuto = false; setGL(!glOn); }
+    return;
+  }
   if(panelOpen){
     if(e.key === "Escape") toggleAssetPanel(false);
     return;
@@ -3208,6 +3379,19 @@ function frame(ts){
   }
   if(state === ST.PAUSE) drawPause();
 
+  // WebGL 水墨后处理合成（画面终点）
+  if(glOn){
+    glDraw();
+    if(glAuto){
+      glFrameAvg = glFrameAvg*0.95 + dt*1000*0.05;
+      if(now > glStartT + 3 && glFrameAvg > 42){
+        glAuto = false;
+        setGL(false);
+        stamps.push({ text:"省电渲染", x:W/2, y:H*0.18, t:0 });
+      }
+    }
+  }
+
   requestAnimationFrame(frame);
 }
 
@@ -3222,12 +3406,14 @@ window.__dbg = {
   ult(){ startUlt(); },
   ink(){ player.ink = 100; },
   kill(){ if(!enemy.dead) killEnemy(); },
+  gl(on){ glAuto = false; setGL(on); },
   hurt(n){ hurtPlayer(n||20); },
   state(){ return { wave, sceneIdx, boss:enemy.bossIdx, hp:enemy.hp,
                     php:player.hp, ink:player.ink, shield:player.shield }; }
 };
 
 resize();
+if(initGL()){ setGL(true); glResize(); }
 $("bestT").textContent = best;
 loadAssets();
 assetBtnEl.classList.remove("hidden");
