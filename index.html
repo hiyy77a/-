@@ -766,6 +766,9 @@ let rings = [];      // 命中冲击波环
 let slashes = [];    // 出招斩击流光
 let petals = [];     // 攻击时的朱砂花瓣/符箓碎片
 let inkBolts = [];   // 夸张动漫剑压闪电
+let speedLines = []; // 镜头速度线/漫画冲刺线
+let impactSeals = []; // 命中朱砂符阵
+let battleCuts = [];  // 动漫分镜切入/白闪定格
 let wisps = [];      // 墨烟卷缕
 let foes = [];       // 敌方来袭弹幕
 let drops = [];      // 墨雨落剑
@@ -2504,6 +2507,20 @@ function attack(){
     inkBolts.push({ pts, t:0, life:rand(.16,.26), col:i?"244,240,228":"176,58,42" });
   }
 
+  // 漫画速度线：镜头跟随角色突进，而不是单纯素材平移
+  for(let i=0;i<9;i++){
+    speedLines.push({
+      x:player.x+rand(-70,30), y:groundY-rand(44,138), len:rand(100,260),
+      vx:rand(-360,-120), t:0, life:rand(.18,.34), w:rand(1.2,4.2),
+      col:Math.random()<0.65?"244,240,228":"28,30,40"
+    });
+  }
+
+  // 高连击触发日漫分镜切入：人物不是平移，而是进入关键帧白闪/斜切构图
+  if(typing.combo % 12 === 0 || player.buffT > 0){
+    battleCuts.push({ t:0, life:0.34, x:player.x+76, y:groundY-100, rot:rand(-0.22,0.16), red:typing.combo % 24 === 0 });
+  }
+
   // 剑尖火花 + 朱砂花瓣/符纸碎片
   for(let i=0;i<16;i++){
     const a = rand(-0.85,0.55), sp = rand(220,620);
@@ -2649,6 +2666,7 @@ function applyDamage(dmg, qx, qy, crit){
                   col: Math.random()<0.4 ? "190,60,40" : "58,60,72" });
   }
   rings.push({ x:qx, y:qy, r:6, t:0, life:0.32, w:3 });
+  impactSeals.push({ x:qx, y:qy, t:0, life:0.42, rot:rand(-0.5,0.5), r:rand(26,42) });
   if(glOn) glRipple(qx, qy);
   for(let i=0;i<2;i++) wisps.push({
     x:qx+rand(-10,10), y:qy+rand(-8,8), drift:rand(14,26), len:rand(14,26),
@@ -2862,7 +2880,7 @@ function startGame(){
   player.forward = 0; player.slashT = 9;
   player.hp = player.maxHp = 100; player.ink = 0; player.shield = 0; player.hurtT = 0;
   player.buffT = 0; player.buffBurstT = 9;
-  qis = []; parts = []; sparks = []; rings = []; slashes = []; petals = []; inkBolts = []; dmgs = []; stamps = []; wisps = [];
+  qis = []; parts = []; sparks = []; rings = []; slashes = []; petals = []; inkBolts = []; speedLines = []; impactSeals = []; battleCuts = []; dmgs = []; stamps = []; wisps = [];
   foes = []; drops = []; rain.n = 0; ghosts = []; ambient = []; freeze = 0;
   goEl.classList.add("hidden");
   ult.active = false;
@@ -3072,6 +3090,9 @@ function update(dt){
   if(sparks.length > 300) sparks.splice(0, sparks.length-300);
   if(petals.length > 120) petals.splice(0, petals.length-120);
   if(inkBolts.length > 80) inkBolts.splice(0, inkBolts.length-80);
+  if(speedLines.length > 120) speedLines.splice(0, speedLines.length-120);
+  if(impactSeals.length > 80) impactSeals.splice(0, impactSeals.length-80);
+  if(battleCuts.length > 12) battleCuts.splice(0, battleCuts.length-12);
   if(wisps.length > 150) wisps.splice(0, wisps.length-150);
   for(let i=rings.length-1;i>=0;i--){
     rings[i].t += dt;
@@ -3088,6 +3109,18 @@ function update(dt){
   for(let i=inkBolts.length-1;i>=0;i--){
     inkBolts[i].t += dt;
     if(inkBolts[i].t >= inkBolts[i].life) inkBolts.splice(i,1);
+  }
+  for(let i=speedLines.length-1;i>=0;i--){
+    const l = speedLines[i]; l.t += dt; l.x += l.vx*dt;
+    if(l.t >= l.life) speedLines.splice(i,1);
+  }
+  for(let i=impactSeals.length-1;i>=0;i--){
+    impactSeals[i].t += dt;
+    if(impactSeals[i].t >= impactSeals[i].life) impactSeals.splice(i,1);
+  }
+  for(let i=battleCuts.length-1;i>=0;i--){
+    battleCuts[i].t += dt;
+    if(battleCuts[i].t >= battleCuts[i].life) battleCuts.splice(i,1);
   }
   for(let i=dmgs.length-1;i>=0;i--){
     dmgs[i].t += dt;
@@ -3184,6 +3217,59 @@ function drawQi(x, y, alpha){
 }
 
 function drawEffects(){
+  // 动漫分镜切入：斜向白闪、朱砂边框和黑场遮罩，让高连击攻击像关键帧演出
+  for(const c of battleCuts){
+    const p = c.t/c.life, a = Math.sin(p*Math.PI);
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.fillStyle = `rgba(18,20,28,${0.18*a})`;
+    ctx.fillRect(0,0,W,H);
+    ctx.translate(c.x, c.y);
+    ctx.rotate(c.rot);
+    const sweep = lerp(-190, 180, easeOut(p));
+    const grad = ctx.createLinearGradient(sweep-120,0,sweep+150,0);
+    grad.addColorStop(0, "rgba(255,250,232,0)");
+    grad.addColorStop(0.45, `rgba(255,250,232,${0.92*a})`);
+    grad.addColorStop(0.56, `rgba(${c.red?"176,58,42":"28,30,40"},${0.55*a})`);
+    grad.addColorStop(1, "rgba(255,250,232,0)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(sweep-160, -220, 320, 440);
+    ctx.strokeStyle = `rgba(176,58,42,${0.75*a})`;
+    ctx.lineWidth = 4;
+    ctx.strokeRect(-118, -74, 236, 148);
+    ctx.font = "28px KaiTi, STKaiti, serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = `rgba(176,58,42,${0.86*a})`;
+    ctx.fillText("一闪", 0, 0);
+    ctx.restore();
+    ctx.textBaseline = "alphabetic";
+  }
+
+  // 镜头速度线：攻击瞬间给画面增加漫画冲刺读帧
+  ctx.lineCap = "round";
+  for(const l of speedLines){
+    const a = 1 - l.t/l.life;
+    const grad = ctx.createLinearGradient(l.x, l.y, l.x+l.len, l.y-10);
+    grad.addColorStop(0, `rgba(${l.col},0)`);
+    grad.addColorStop(0.42, `rgba(${l.col},${0.55*a})`);
+    grad.addColorStop(1, `rgba(${l.col},0)`);
+    ctx.strokeStyle = grad; ctx.lineWidth = l.w*a;
+    ctx.beginPath(); ctx.moveTo(l.x, l.y); ctx.lineTo(l.x+l.len, l.y-10); ctx.stroke();
+  }
+  // 命中朱砂符阵：短暂旋转放大，增强敌人受击反馈
+  for(const m of impactSeals){
+    const t = m.t/m.life, a = Math.sin(t*Math.PI);
+    ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(m.rot + t*0.9); ctx.globalAlpha = a;
+    ctx.strokeStyle = "rgba(176,58,42,0.88)"; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.arc(0,0,m.r*(0.7+t*0.6),0,TAU); ctx.stroke();
+    ctx.beginPath();
+    for(let i=0;i<8;i++){ const an=i*TAU/8; ctx.moveTo(Math.cos(an)*m.r*0.35, Math.sin(an)*m.r*0.35); ctx.lineTo(Math.cos(an)*m.r*1.08, Math.sin(an)*m.r*1.08); }
+    ctx.stroke();
+    ctx.font = `${Math.max(18,m.r*0.55)}px KaiTi, STKaiti, serif`; ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillStyle = "rgba(176,58,42,0.92)"; ctx.fillText("破", 0, 2); ctx.textBaseline="alphabetic";
+    ctx.restore();
+  }
+
   // 剑气 + 拖尾
   for(const q of qis){
     for(let i=q.trail.length%2;i<q.trail.length;i+=2){
@@ -3396,6 +3482,34 @@ function drawEffects(){
   }
 }
 
+function drawForegroundInk(){
+  // 前景水墨遮幅：不同场景生成近景枝叶/沙丘/浪花/屋檐/云边，增强真实层次与速度感
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.strokeStyle = "rgba(24,26,34,0.32)";
+  ctx.fillStyle = "rgba(24,26,34,0.16)";
+  if(sceneIdx === 0){
+    for(let i=0;i<7;i++){
+      const x = ((i*197 - scroll*5.4) % (W+160) + W+160) % (W+160) - 80;
+      ctx.lineWidth = 3 + (i%3); ctx.beginPath(); ctx.moveTo(x, H); ctx.quadraticCurveTo(x+18, groundY-70, x+6, groundY-170); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(x+18, groundY-150+(i%2)*22, 22, 5, -0.4, 0, TAU); ctx.fill();
+    }
+  }else if(sceneIdx === 1){
+    ctx.beginPath(); ctx.moveTo(0,H);
+    for(let x=0;x<=W+80;x+=80) ctx.quadraticCurveTo(x+40, groundY+20+Math.sin(now+x)*8, x+80, groundY+38);
+    ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
+  }else if(sceneIdx === 2){
+    ctx.strokeStyle = "rgba(232,242,238,0.42)"; ctx.lineWidth = 3;
+    for(let i=0;i<8;i++){ const x=((i*151-scroll*7)%(W+120)+W+120)%(W+120)-60; ctx.beginPath(); ctx.arc(x,H-42,34+8*Math.sin(now+i),Math.PI*1.05,Math.PI*1.86); ctx.stroke(); }
+  }else if(sceneIdx === 3){
+    ctx.fillStyle = "rgba(24,22,24,0.22)"; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(W*.28,0); ctx.lineTo(W*.22,34); ctx.lineTo(0,54); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(W,0); ctx.lineTo(W*.74,0); ctx.lineTo(W*.8,38); ctx.lineTo(W,58); ctx.closePath(); ctx.fill();
+  }else{
+    for(let i=0;i<5;i++){ const x=((i*229-scroll*2.2)%(W+180)+W+180)%(W+180)-90; ctx.beginPath(); ctx.ellipse(x,H-34,90,22,0,0,TAU); ctx.fill(); }
+  }
+  ctx.restore();
+}
+
 function drawPaperOverlay(){
   ctx.drawImage(overlayTex, 0, 0, W, H);
 }
@@ -3437,6 +3551,7 @@ function frame(ts){
   }
   drawPlayer();
   if(state !== ST.TITLE) drawEffects();
+  drawForegroundInk();
   drawUlt();
   ctx.restore();
 
