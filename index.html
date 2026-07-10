@@ -20,18 +20,25 @@
   }
   #textbar {
     max-width:1060px; width:92%;
-    background:linear-gradient(180deg, rgba(244,238,222,.96), rgba(232,224,202,.96));
+    background:
+      radial-gradient(circle at 8% 18%, rgba(28,30,40,.08), transparent 18%),
+      radial-gradient(circle at 94% 82%, rgba(176,58,42,.10), transparent 22%),
+      linear-gradient(180deg, rgba(244,238,222,.96), rgba(232,224,202,.96));
     border:1px solid rgba(40,40,45,.35);
-    box-shadow:0 4px 18px rgba(30,30,35,.25), inset 0 0 60px rgba(120,100,60,.12);
-    border-radius:4px;
+    box-shadow:0 8px 28px rgba(30,30,35,.28), inset 0 0 70px rgba(120,100,60,.16), inset 0 0 0 2px rgba(255,250,232,.35);
+    border-radius:10px 2px 10px 2px;
     padding:18px 30px 14px;
     position:relative;
+    overflow:hidden;
   }
+  #textbar::marker { display:none; }
   #textbar::before, #textbar::after {
-    content:""; position:absolute; top:6px; bottom:6px; width:3px;
-    background:rgba(40,40,45,.25);
+    content:""; position:absolute; top:8px; bottom:8px; width:4px;
+    background:linear-gradient(rgba(40,40,45,.05), rgba(40,40,45,.38), rgba(176,58,42,.22));
+    border-radius:99px;
+    filter:blur(.15px);
   }
-  #textbar::before { left:8px; } #textbar::after { right:8px; }
+  #textbar::before { left:10px; } #textbar::after { right:10px; }
   #passage {
     font-family:Georgia,"Times New Roman",serif;
     font-size:24px; line-height:1.55; letter-spacing:.5px;
@@ -99,8 +106,10 @@
   #vitals { top:238px; left:26px; }
   .barwrap {
     position:relative; width:210px; height:15px; margin-bottom:8px;
-    border:2px solid rgba(40,42,50,.7); border-radius:3px;
-    background:rgba(244,238,222,.65);
+    border:2px solid rgba(40,42,50,.7); border-radius:10px 2px 10px 2px;
+    background:linear-gradient(90deg, rgba(244,238,222,.78), rgba(220,210,184,.58));
+    box-shadow:inset 0 0 12px rgba(30,30,35,.16), 0 2px 8px rgba(30,30,35,.12);
+    overflow:hidden;
   }
   .barwrap .fill { position:absolute; left:2px; top:2px; bottom:2px; width:100%; transition:width .15s; }
   #hpbar  { background:#b03a2a; }
@@ -108,10 +117,13 @@
   .barlab { position:absolute; right:-44px; top:-3px; font-size:15px; color:#4a4c55; }
   #skills { display:flex; gap:8px; margin-top:12px; }
   .skill {
-    border:2px solid rgba(40,42,50,.6); background:rgba(244,238,222,.88);
-    padding:3px 9px; font-size:15px; color:#2a2c33; border-radius:4px;
-    transition:opacity .15s;
+    border:2px solid rgba(40,42,50,.6);
+    background:radial-gradient(circle at 30% 20%, rgba(255,250,232,.95), rgba(232,224,202,.88));
+    padding:3px 9px; font-size:15px; color:#2a2c33; border-radius:9px 2px 9px 2px;
+    box-shadow:inset 0 -8px 16px rgba(80,70,50,.08), 0 2px 8px rgba(30,30,35,.10);
+    transition:opacity .15s, transform .15s, box-shadow .15s;
   }
+  .skill.on { transform:translateY(-1px) scale(1.04); }
   .skill b { color:#b03a2a; margin-right:4px; }
   .skill i { font-style:normal; color:#7a7362; margin-left:5px; font-size:12px; }
   .skill.off { opacity:.35; }
@@ -752,6 +764,8 @@ let parts = [];      // 水墨粒子
 let sparks = [];     // 火花流光（短促亮色线条）
 let rings = [];      // 命中冲击波环
 let slashes = [];    // 出招斩击流光
+let petals = [];     // 攻击时的朱砂花瓣/符箓碎片
+let inkBolts = [];   // 夸张动漫剑压闪电
 let wisps = [];      // 墨烟卷缕
 let foes = [];       // 敌方来袭弹幕
 let drops = [];      // 墨雨落剑
@@ -2467,23 +2481,46 @@ function attack(){
   sfx("slash");
   const px = player.x + 58, py = groundY - 82;
   qis.push({ x:px, y:py, born:now, trail:[] });
-  // 斩击流光
-  slashes.push({ x:player.x+24, y:groundY-70, ang:rand(-0.55,0.1), len:rand(70,110), t:0 });
-  // 剑尖火花
-  for(let i=0;i<4;i++){
-    const a = rand(-0.7,0.5);
-    sparks.push({ x:px, y:py, vx:Math.cos(a)*rand(180,420), vy:Math.sin(a)*rand(180,420),
-                  life:rand(.14,.3), t:0, w:rand(1,2.2),
-                  col: Math.random()<0.5 ? "190,60,40" : "236,230,216" });
+
+  // 三层动漫化剑势：外圈朱砂、内圈白刃、墨色尾锋，形成非平移式挥砍动作读帧
+  for(let i=0;i<3;i++){
+    slashes.push({
+      x:player.x+18+i*10, y:groundY-78+i*3,
+      ang:rand(-0.76,-0.08)+i*0.18, len:rand(96,154)-i*18,
+      bend:rand(18,34), t:-i*0.025, life:0.24+i*0.035,
+      col:i===0?"176,58,42":(i===1?"244,240,228":"28,30,40")
+    });
   }
-  wisps.push({ x:px-6, y:py, drift:rand(12,24), len:rand(12,22), t:0,
-               life:rand(.4,.7), col:"48,50,62", curl:rand(0.7,1.4) });
+
+  // 剑压闪电：锯齿形亮线模拟日漫必杀帧
+  for(let i=0;i<2;i++){
+    const pts = [];
+    const baseA = rand(-0.38,0.12), len = rand(118,190);
+    for(let k=0;k<7;k++){
+      const d = len*k/6, off = (k%2?1:-1)*rand(5,16);
+      pts.push([px + Math.cos(baseA)*d - Math.sin(baseA)*off,
+                py + Math.sin(baseA)*d + Math.cos(baseA)*off]);
+    }
+    inkBolts.push({ pts, t:0, life:rand(.16,.26), col:i?"244,240,228":"176,58,42" });
+  }
+
+  // 剑尖火花 + 朱砂花瓣/符纸碎片
+  for(let i=0;i<16;i++){
+    const a = rand(-0.85,0.55), sp = rand(220,620);
+    sparks.push({ x:px, y:py, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp,
+                  life:rand(.16,.42), t:0, w:rand(1,3.6),
+                  col: Math.random()<0.45 ? "190,60,40" : (Math.random()<0.55 ? "236,230,216" : "80,86,104") });
+    if(i<7) petals.push({ x:px+rand(-8,10), y:py+rand(-18,12), vx:Math.cos(a)*rand(80,260), vy:Math.sin(a)*rand(80,260)-rand(20,80),
+                          rot:rand(0,TAU), vr:rand(-9,9), s:rand(4,9), t:0, life:rand(.45,.9), red:Math.random()<0.7 });
+  }
+  for(let i=0;i<3;i++) wisps.push({ x:px-rand(0,18), y:py+rand(-12,14), drift:rand(18,42), len:rand(20,42), t:0,
+               life:rand(.45,.85), col:i?"48,50,62":"176,58,42", curl:rand(0.7,1.8) });
   // 脚下墨尘
-  for(let i=0;i<5;i++){
-    parts.push({ x:player.x+rand(-8,14), y:groundY-3, vx:rand(-70,-20), vy:rand(-46,-8),
-                 r:rand(1.5,4), life:rand(.3,.6), t:0, col:"rgba(60,60,68," });
+  for(let i=0;i<14;i++){
+    parts.push({ x:player.x+rand(-12,22), y:groundY-3, vx:rand(-130,-18), vy:rand(-86,-6),
+                 r:rand(1.5,5.6), life:rand(.32,.74), t:0, col:Math.random()<0.25?"rgba(176,58,42,":"rgba(60,60,68," });
   }
-  shake = Math.min(shake+0.8, 5);
+  shake = Math.min(shake+1.8, 7);
 }
 
 /* ---- 敌方反击弹幕 ---- */
@@ -2825,7 +2862,7 @@ function startGame(){
   player.forward = 0; player.slashT = 9;
   player.hp = player.maxHp = 100; player.ink = 0; player.shield = 0; player.hurtT = 0;
   player.buffT = 0; player.buffBurstT = 9;
-  qis = []; parts = []; sparks = []; rings = []; slashes = []; dmgs = []; stamps = []; wisps = [];
+  qis = []; parts = []; sparks = []; rings = []; slashes = []; petals = []; inkBolts = []; dmgs = []; stamps = []; wisps = [];
   foes = []; drops = []; rain.n = 0; ghosts = []; ambient = []; freeze = 0;
   goEl.classList.add("hidden");
   ult.active = false;
@@ -3032,7 +3069,9 @@ function update(dt){
     if(wisps[i].t > wisps[i].life) wisps.splice(i,1);
   }
   if(parts.length > 420) parts.splice(0, parts.length-420);
-  if(sparks.length > 260) sparks.splice(0, sparks.length-260);
+  if(sparks.length > 300) sparks.splice(0, sparks.length-300);
+  if(petals.length > 120) petals.splice(0, petals.length-120);
+  if(inkBolts.length > 80) inkBolts.splice(0, inkBolts.length-80);
   if(wisps.length > 150) wisps.splice(0, wisps.length-150);
   for(let i=rings.length-1;i>=0;i--){
     rings[i].t += dt;
@@ -3040,7 +3079,15 @@ function update(dt){
   }
   for(let i=slashes.length-1;i>=0;i--){
     slashes[i].t += dt;
-    if(slashes[i].t > 0.22) slashes.splice(i,1);
+    if(slashes[i].t > (slashes[i].life || 0.22)) slashes.splice(i,1);
+  }
+  for(let i=petals.length-1;i>=0;i--){
+    const p = petals[i]; p.t += dt; p.x += p.vx*dt; p.y += p.vy*dt; p.vy += 120*dt; p.rot += p.vr*dt;
+    if(p.t >= p.life) petals.splice(i,1);
+  }
+  for(let i=inkBolts.length-1;i>=0;i--){
+    inkBolts[i].t += dt;
+    if(inkBolts[i].t >= inkBolts[i].life) inkBolts.splice(i,1);
   }
   for(let i=dmgs.length-1;i>=0;i--){
     dmgs[i].t += dt;
@@ -3145,21 +3192,35 @@ function drawEffects(){
     }
     drawQi(q.x, q.y, 0.95);
   }
-  // 出招斩击流光
+  // 出招斩击流光：贝塞尔宽弧 + 朱砂外焰 + 白色剑刃高光
   for(const s of slashes){
-    const a = 1 - s.t/0.22;
+    if(s.t < 0) continue;
+    const life = s.life || 0.22, a = 1 - s.t/life;
     ctx.save();
     ctx.translate(s.x, s.y);
     ctx.rotate(s.ang);
     const g = ctx.createLinearGradient(0,0,s.len,0);
-    g.addColorStop(0, `rgba(244,240,228,0)`);
-    g.addColorStop(0.6, `rgba(244,240,228,${0.9*a})`);
+    g.addColorStop(0, `rgba(${s.col||"244,240,228"},0)`);
+    g.addColorStop(0.5, `rgba(${s.col||"244,240,228"},${0.95*a})`);
     g.addColorStop(1, `rgba(30,32,44,0)`);
-    ctx.strokeStyle = g;
-    ctx.lineWidth = 3.5*a;
-    ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(s.len, -8); ctx.stroke();
+    ctx.strokeStyle = g; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.lineWidth = (s.col==="176,58,42"?11:6)*a + 0.6;
+    ctx.beginPath();
+    ctx.moveTo(0,0); ctx.quadraticCurveTo(s.len*0.42, -s.bend, s.len, -8); ctx.stroke();
+    ctx.strokeStyle = `rgba(255,250,230,${0.7*a})`;
+    ctx.lineWidth = 1.4*a + 0.4;
+    ctx.beginPath(); ctx.moveTo(s.len*0.18,-3); ctx.quadraticCurveTo(s.len*0.52, -s.bend-6, s.len*0.9, -8); ctx.stroke();
     ctx.restore();
+  }
+  // 动漫剑压闪电
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for(const b of inkBolts){
+    const a = 1 - b.t/b.life;
+    ctx.strokeStyle = `rgba(${b.col},${0.82*a})`; ctx.lineWidth = 4.6*a+0.5;
+    ctx.beginPath(); ctx.moveTo(b.pts[0][0], b.pts[0][1]);
+    for(let i=1;i<b.pts.length;i++) ctx.lineTo(b.pts[i][0], b.pts[i][1]);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(255,252,236,${0.65*a})`; ctx.lineWidth = 1.4*a; ctx.stroke();
   }
   // 墨粒子
   for(const p of parts){
@@ -3168,6 +3229,16 @@ function drawEffects(){
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.r*(0.5+a*0.5), 0, TAU);
     ctx.fill();
+  }
+  // 朱砂花瓣 / 符箓碎片
+  for(const p of petals){
+    const a = 1 - p.t/p.life;
+    ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot); ctx.globalAlpha = a;
+    ctx.fillStyle = p.red ? "rgba(176,58,42,0.88)" : "rgba(238,226,190,0.9)";
+    ctx.beginPath();
+    ctx.moveTo(0,-p.s); ctx.quadraticCurveTo(p.s*0.75,0,0,p.s); ctx.quadraticCurveTo(-p.s*0.6,0,0,-p.s);
+    ctx.fill();
+    ctx.restore();
   }
   // 火花流光（亮色短线）
   ctx.lineCap = "round";
